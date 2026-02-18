@@ -27,7 +27,8 @@ import {
   Zap,
   MessageSquare,
   Send,
-  User
+  User,
+  GanttChartSquare
 } from 'lucide-react';
 import { Task, Discipline, TaskStatus, Comment } from '../types';
 import { AREAS, RESPONSIBLES } from '../constants';
@@ -616,14 +617,14 @@ const TaskGrid: React.FC<TaskGridProps> = ({ tasks, onUpdateTask, onImportTasks 
         ) : (
           <div className="flex flex-col items-center justify-center py-40 animate-in fade-in duration-1000">
             <div className="relative mb-10">
-              <div className="w-32 h-32 bg-slate-200 rounded-[40px] flex items-center justify-center text-slate-400 shadow-inner">
-                <FileText className="w-14 h-14" />
+              <div className="w-40 h-40 bg-blue-50 rounded-[48px] flex items-center justify-center text-blue-600 shadow-xl border border-blue-100/50">
+                <GanttChartSquare className="w-20 h-20" />
               </div>
               <div className="absolute -top-4 -right-4 w-12 h-12 bg-white rounded-2xl shadow-xl flex items-center justify-center border border-slate-100">
                 <BrainCircuit className="w-6 h-6 text-blue-600" />
               </div>
             </div>
-            <h2 className="text-3xl font-black text-slate-900 mb-4 tracking-tight">Área do Cronograma</h2>
+            <h2 className="text-3xl font-black text-slate-900 mb-4 tracking-tight">Área do Cronograma de Atividades</h2>
             <p className="text-slate-500 max-w-lg text-center font-medium leading-relaxed text-lg px-4">
               Importe o PDF ou Imagem do seu cronograma. Nossa IA Pro utiliza OCR de alta precisão para reconstruir as atividades, frentes de trabalho e datas críticas.
             </p>
