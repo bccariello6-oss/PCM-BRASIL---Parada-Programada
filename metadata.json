@@ -1,0 +1,8 @@
+
+{
+  "name": "PCM SWM BRASIL",
+  "description": "Sistema profissional de gestão de paradas programadas industriais, focado em acompanhamento de cronogramas, indicadores de desempenho e colaboração em tempo real.",
+  "requestFramePermissions": [
+    "camera"
+  ]
+}
