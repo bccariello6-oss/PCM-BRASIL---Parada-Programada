@@ -3,24 +3,48 @@ import { supabase } from '../lib/supabase';
 import { KeyRound, Mail, Loader2, GanttChartSquare } from 'lucide-react';
 
 const Login: React.FC = () => {
+    const [isSignUp, setIsSignUp] = useState(false);
     const [email, setEmail] = useState('');
     const [password, setPassword] = useState('');
     const [loading, setLoading] = useState(false);
     const [error, setError] = useState<string | null>(null);
+    const [success, setSuccess] = useState<string | null>(null);
 
-    const handleLogin = async (e: React.FormEvent) => {
+    const handleSubmit = async (e: React.FormEvent) => {
         e.preventDefault();
         setLoading(true);
         setError(null);
+        setSuccess(null);
 
-        const { error } = await supabase.auth.signInWithPassword({
-            email,
-            password,
-        });
+        if (isSignUp) {
+            const { error, data } = await supabase.auth.signUp({
+                email,
+                password,
+                options: {
+                    emailRedirectTo: window.location.origin
+                }
+            });
 
-        if (error) {
-            setError('Credenciais inválidas ou erro de conexão.');
-            setLoading(false);
+            if (error) {
+                setError(error.message === 'User already registered' ? 'E-mail já cadastrado.' : error.message);
+                setLoading(false);
+            } else if (data.user && data.session) {
+                // Auto-logged in
+            } else {
+                setSuccess('Conta criada! Verifique seu e-mail (caso a confirmação esteja ativa) ou tente entrar.');
+                setLoading(false);
+                setIsSignUp(false);
+            }
+        } else {
+            const { error } = await supabase.auth.signInWithPassword({
+                email,
+                password,
+            });
+
+            if (error) {
+                setError('Credenciais inválidas ou erro de conexão.');
+                setLoading(false);
+            }
         }
     };
 
@@ -36,9 +60,11 @@ const Login: React.FC = () => {
                 </div>
 
                 <div className="bg-white p-8 rounded-[32px] border border-slate-200 shadow-xl shadow-slate-200/50">
-                    <h2 className="text-xl font-bold text-slate-800 mb-6">Acesso ao Sistema</h2>
+                    <h2 className="text-xl font-bold text-slate-800 mb-6">
+                        {isSignUp ? 'Criar Nova Conta' : 'Acesso ao Sistema'}
+                    </h2>
 
-                    <form onSubmit={handleLogin} className="space-y-4">
+                    <form onSubmit={handleSubmit} className="space-y-4">
                         <div className="space-y-1.5">
                             <label className="text-[11px] font-black text-slate-400 uppercase tracking-widest ml-1">E-mail</label>
                             <div className="relative">
@@ -75,6 +101,12 @@ const Login: React.FC = () => {
                             </div>
                         )}
 
+                        {success && (
+                            <div className="p-4 bg-emerald-50 border border-emerald-100 rounded-2xl text-emerald-600 text-xs font-bold">
+                                {success}
+                            </div>
+                        )}
+
                         <button
                             type="submit"
                             disabled={loading}
@@ -83,9 +115,23 @@ const Login: React.FC = () => {
                             {loading ? (
                                 <Loader2 className="w-5 h-5 animate-spin" />
                             ) : (
-                                'ENTRAR NO SISTEMA'
+                                isSignUp ? 'CADASTRAR E ENTRAR' : 'ENTRAR NO SISTEMA'
                             )}
                         </button>
+
+                        <div className="mt-6 pt-6 border-t border-slate-100 text-center">
+                            <button
+                                type="button"
+                                onClick={() => {
+                                    setIsSignUp(!isSignUp);
+                                    setError(null);
+                                    setSuccess(null);
+                                }}
+                                className="text-xs font-black text-blue-600 uppercase tracking-widest hover:text-blue-700 transition-colors"
+                            >
+                                {isSignUp ? 'Já tem uma conta? Entrar' : 'Não tem uma conta? Cadastre-se'}
+                            </button>
+                        </div>
                     </form>
                 </div>
             </div>
