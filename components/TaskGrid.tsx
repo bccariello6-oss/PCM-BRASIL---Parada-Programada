@@ -162,7 +162,7 @@ const TaskGrid: React.FC<TaskGridProps> = ({ tasks, onUpdateTask, onImportTasks 
 
     try {
       const base64Data = await fileToBase64(file);
-      const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
+      const ai = new GoogleGenAI({ apiKey: import.meta.env.VITE_GEMINI_API_KEY });
 
       setImportStatus('Reconstruindo estrutura analítica (WBS) via IA Pro...');
       setImportProgress(35);
