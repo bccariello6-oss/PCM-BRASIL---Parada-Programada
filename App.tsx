@@ -46,7 +46,7 @@ const App: React.FC = () => {
         .channel(`atividades-${activeEvent.id}`)
         .on(
           'postgres_changes',
-          { event: '*', schema: 'public', table: 'atividades', filter: `evento_id=eq.${activeEvent.id}` },
+          { event: '*', schema: 'public', table: 'cronograma_dados', filter: `evento_id=eq.${activeEvent.id}` },
           () => fetchShutdownData()
         )
         .subscribe();

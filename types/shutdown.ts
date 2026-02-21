@@ -1,6 +1,24 @@
 
 export type ShutdownStatus = 'Planejada' | 'Em Andamento' | 'Concluída' | 'Atrasada';
 
+export interface CronogramaDado {
+    id: string;
+    evento_id: string;
+    atividade: string; // Matches 'atividade' in DB
+    nome?: string;      // Alias for UI templates
+    inicio_previsto: string;
+    fim_previsto: string;
+    duracao: number;
+    percentual_planejado: number;
+    percentual_real: number;
+    responsavel?: string;
+    area?: string;
+    subatividade?: string;
+    status: ShutdownStatus;
+    atualizado_em: string;
+    subatividades?: CronogramaDado[];
+}
+
 export interface Evento {
     id: string;
     nome: string;
@@ -17,25 +35,7 @@ export interface Area {
     nome: string;
 }
 
-export interface Atividade {
-    id: string;
-    evento_id: string;
-    area_id: string;
-    atividade_pai_id?: string;
-    nome: string;
-    responsavel?: string;
-    inicio_previsto: string;
-    fim_previsto: string;
-    inicio_real?: string;
-    fim_real?: string;
-    duracao: number;
-    percentual_planejado: number;
-    percentual_real: number;
-    status: ShutdownStatus;
-    criticidade?: string;
-    atualizado_em: string;
-    subatividades?: Atividade[];
-}
+export interface Atividade extends CronogramaDado { }
 
 export interface ShutdownStats {
     progresso_real: number;

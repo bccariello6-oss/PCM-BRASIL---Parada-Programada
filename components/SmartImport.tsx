@@ -24,7 +24,9 @@ const SmartImport: React.FC<SmartImportProps> = ({ onImport, onCancel }) => {
         { key: 'percentual_real', label: '% Real' },
         { key: 'responsavel', label: 'Responsável' },
         { key: 'area', label: 'Área' },
-        { key: 'subatividade', label: 'Subatividade' }
+        { key: 'subatividade', label: 'Subatividade' },
+        { key: 'percentual_planejado', label: '% Planejado' },
+        { key: 'duracao', label: 'Duração (h)' }
     ];
 
     const fileToBase64 = (file: File): Promise<string> => {
@@ -124,7 +126,9 @@ const SmartImport: React.FC<SmartImportProps> = ({ onImport, onCancel }) => {
             percentual_real: ['% real', 'realizado', 'progresso'],
             responsavel: ['responsavel', 'executor', 'quem'],
             area: ['area', 'disciplina', 'setor'],
-            subatividade: ['subatividade', 'subtarefa']
+            subatividade: ['subatividade', 'subtarefa'],
+            percentual_planejado: ['% planejado', 'planejado'],
+            duracao: ['duracao', 'horas', 'tempo']
         };
 
         headers.forEach((h, index) => {
