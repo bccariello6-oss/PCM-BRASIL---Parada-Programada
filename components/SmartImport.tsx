@@ -95,10 +95,14 @@ const SmartImport: React.FC<SmartImportProps> = ({ onImport, onCancel }) => {
 
         try {
             const base64Data = await fileToBase64(uploadedFile);
-            const apiKey = import.meta.env.VITE_GEMINI_API_KEY;
+            // Try multiple sources for the API key
+            const apiKey = import.meta.env.VITE_GEMINI_API_KEY
+                || (typeof process !== 'undefined' && process.env?.GEMINI_API_KEY)
+                || (typeof process !== 'undefined' && process.env?.API_KEY)
+                || '';
 
             if (!apiKey || apiKey === 'PLACEHOLDER_API_KEY') {
-                throw new Error('API Key do Gemini não configurada.');
+                throw new Error('API Key do Gemini não configurada. Na Vercel, adicione a variável VITE_GEMINI_API_KEY nas Environment Variables do projeto.');
             }
 
             const ai = new GoogleGenAI({ apiKey });
@@ -228,7 +232,7 @@ const SmartImport: React.FC<SmartImportProps> = ({ onImport, onCancel }) => {
                             <p className="text-sm font-medium leading-relaxed">{error}</p>
                             {error.includes('API Key') && (
                                 <p className="mt-2 text-xs font-bold bg-white/50 p-2 rounded-lg border border-red-200">
-                                    Dica: Verifique se o arquivo `.env.local` contém uma chave Gemini Pro válida.
+                                    Dica: Na Vercel, vá em Settings → Environment Variables e adicione <code>VITE_GEMINI_API_KEY</code> com sua chave Gemini. Depois faça Redeploy.
                                 </p>
                             )}
                         </div>
