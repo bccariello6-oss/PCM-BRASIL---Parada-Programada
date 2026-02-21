@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { Upload, FileText, AlertCircle, CheckCircle2, ChevronRight, Loader2, Zap, BrainCircuit } from 'lucide-react';
+import { Upload, FileText, AlertCircle, Loader2, Zap, BrainCircuit, CheckCircle2 } from 'lucide-react';
 import * as XLSX from 'xlsx';
 import { GoogleGenAI } from "@google/genai";
 
@@ -9,13 +9,9 @@ interface SmartImportProps {
 }
 
 const SmartImport: React.FC<SmartImportProps> = ({ onImport, onCancel }) => {
-    const [file, setFile] = useState<File | null>(null);
-    const [preview, setPreview] = useState<any[]>([]);
-    const [mapping, setMapping] = useState<Record<string, string>>({});
-    const [error, setError] = useState<string | null>(null);
     const [isAIProcessing, setIsAIProcessing] = useState(false);
     const [aiStatus, setAIStatus] = useState('');
-    const [aiResult, setAiResult] = useState<any[]>([]);
+    const [error, setError] = useState<string | null>(null);
 
     const expectedFields = [
         { key: 'atividade', label: 'Atividade', required: true },
@@ -42,54 +38,82 @@ const SmartImport: React.FC<SmartImportProps> = ({ onImport, onCancel }) => {
         const uploadedFile = e.target.files?.[0];
         if (!uploadedFile) return;
 
-        setFile(uploadedFile);
         setError(null);
+        setIsAIProcessing(true);
 
-        if (uploadedFile.type === 'application/pdf' || uploadedFile.type.startsWith('image/')) {
-            await handleAIParsing(uploadedFile);
-        } else {
-            handleExcelParsing(uploadedFile);
+        try {
+            if (uploadedFile.type === 'application/pdf' || uploadedFile.type.startsWith('image/')) {
+                await handleAIParsing(uploadedFile);
+            } else {
+                await handleExcelParsing(uploadedFile);
+            }
+        } catch (err) {
+            console.error("Import error:", err);
+            setError('Falha ao processar o arquivo. Verifique o formato e tente novamente.');
+            setIsAIProcessing(false);
         }
     };
 
-    const handleExcelParsing = (uploadedFile: File) => {
-        const reader = new FileReader();
-        reader.onload = (event) => {
-            const bstr = event.target?.result;
-            const wb = XLSX.read(bstr, { type: 'binary' });
-            const wsname = wb.SheetNames[0];
-            const ws = wb.Sheets[wsname];
-            const data = XLSX.utils.sheet_to_json(ws, { header: 1 });
+    const handleExcelParsing = (uploadedFile: File): Promise<void> => {
+        return new Promise((resolve) => {
+            const reader = new FileReader();
+            reader.onload = (event) => {
+                const bstr = event.target?.result;
+                const wb = XLSX.read(bstr, { type: 'binary' });
+                const wsname = wb.SheetNames[0];
+                const ws = wb.Sheets[wsname];
+                const data = XLSX.utils.sheet_to_json(ws);
 
-            if (data.length > 0) {
-                const headers = data[0] as string[];
-                setPreview(data.slice(1, 6)); // Preview 5 rows
-                autoMap(headers);
-            }
-        };
-        reader.readAsBinaryString(uploadedFile);
+                if (data.length > 0) {
+                    const headers = Object.keys(data[0] as object);
+                    const mapping = autoMap(headers);
+
+                    const finalData = data.map((row: any) => {
+                        const obj: any = {};
+                        expectedFields.forEach(field => {
+                            const mappedHeader = mapping[field.key];
+                            if (mappedHeader) {
+                                obj[field.key] = row[mappedHeader];
+                            }
+                        });
+                        return obj;
+                    });
+
+                    onImport(finalData);
+                } else {
+                    setError('Arquivo Excel está vazio.');
+                    setIsAIProcessing(false);
+                }
+                resolve();
+            };
+            reader.readAsBinaryString(uploadedFile);
+        });
     };
 
     const handleAIParsing = async (uploadedFile: File) => {
-        setIsAIProcessing(true);
-        setAIStatus('Iniciando OCR Inteligente...');
+        setAIStatus('Extraindo dados via IA Pro...');
 
         try {
             const base64Data = await fileToBase64(uploadedFile);
-            const ai = new GoogleGenAI({ apiKey: import.meta.env.VITE_GEMINI_API_KEY });
+            const apiKey = import.meta.env.VITE_GEMINI_API_KEY;
 
-            setAIStatus('Processando estrutura do cronograma via IA Pro...');
+            if (!apiKey || apiKey === 'PLACEHOLDER_API_KEY') {
+                throw new Error('API Key do Gemini não configurada.');
+            }
+
+            const ai = new GoogleGenAI({ apiKey });
+            const aiPrompt = `Extraia o cronograma deste documento. Procure por colunas como Atividade, Início, Fim, Responsável, etc.
+                        Retorne um JSON array de objetos. 
+                        Tente identificar a hierarquia (Subatividades).
+                        Campos sugeridos (em português): atividade, inicio_previsto, fim_previsto, responsavel, percentual_real, area, subatividade, percentual_planejado, duracao.
+                        Mantenha os campos em minúsculo e use snake_case.`;
 
             const response = await ai.models.generateContent({
                 model: 'gemini-1.5-flash',
                 contents: [{
                     parts: [
                         { inlineData: { mimeType: uploadedFile.type, data: base64Data } },
-                        {
-                            text: `Extraia o cronograma deste documento. Procure por colunas como Atividade, Início, Fim, Responsável, etc.
-                        Retorne um JSON array de objetos. 
-                        Tente identificar a hierarquia (Subatividades).
-                        Campos sugeridos: atividade, inicio_previsto, fim_previsto, responsavel, percentual_real, area, subatividade.` }
+                        { text: aiPrompt }
                     ]
                 }],
                 config: {
@@ -99,28 +123,26 @@ const SmartImport: React.FC<SmartImportProps> = ({ onImport, onCancel }) => {
 
             const rawData = JSON.parse(response.text || "[]");
             if (rawData.length > 0) {
-                setAiResult(rawData);
-                setPreview(rawData.slice(0, 5).map((r: any) => Object.values(r)));
-                const headers = Object.keys(rawData[0]);
-                autoMap(headers);
+                onImport(rawData);
             } else {
                 setError('A IA não conseguiu identificar dados neste arquivo.');
+                setIsAIProcessing(false);
             }
-        } catch (err) {
+        } catch (err: any) {
             console.error("Erro no processamento AI:", err);
-            setError('Erro ao processar arquivo com IA. Verifique sua chave API.');
-        } finally {
+            setError(err.message || 'Erro ao processar arquivo com IA. Verifique sua chave API.');
             setIsAIProcessing(false);
+        } finally {
             setAIStatus('');
         }
     };
 
-    const autoMap = (headers: string[]) => {
+    const autoMap = (headers: string[]): Record<string, string> => {
         const newMapping: Record<string, string> = {};
         const normalize = (s: string) => s.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").trim();
 
         const patterns: Record<string, string[]> = {
-            atividade: ['atividade', 'tarefa', 'item'],
+            atividade: ['atividade', 'tarefa', 'item', 'descri'],
             inicio_previsto: ['inicio', 'data inicio', 'start', 'comeco'],
             fim_previsto: ['fim', 'termino', 'finish', 'conclusao'],
             percentual_real: ['% real', 'realizado', 'progresso'],
@@ -131,7 +153,7 @@ const SmartImport: React.FC<SmartImportProps> = ({ onImport, onCancel }) => {
             duracao: ['duracao', 'horas', 'tempo']
         };
 
-        headers.forEach((h, index) => {
+        headers.forEach((h) => {
             const normalizedHeader = normalize(h);
             for (const [field, variations] of Object.entries(patterns)) {
                 if (variations.some(v => normalizedHeader.includes(v))) {
@@ -141,151 +163,84 @@ const SmartImport: React.FC<SmartImportProps> = ({ onImport, onCancel }) => {
             }
         });
 
-        setMapping(newMapping);
-    };
-
-    const validateAndImport = () => {
-        // Validation logic here
-        const missing = expectedFields.filter(f => f.required && !mapping[f.key]);
-        if (missing.length > 0) {
-            setError(`Campos obrigatórios faltando: ${missing.map(m => m.label).join(', ')}`);
-            return;
-        }
-
-        if (aiResult.length > 0) {
-            onImport(aiResult);
-        } else {
-            // Process Excel data using the mapping
-            const reader = new FileReader();
-            reader.onload = (event) => {
-                const bstr = event.target?.result;
-                const wb = XLSX.read(bstr, { type: 'binary' });
-                const ws = wb.Sheets[wb.SheetNames[0]];
-                const data = XLSX.utils.sheet_to_json(ws);
-
-                const finalData = data.map((row: any) => {
-                    const obj: any = {};
-                    expectedFields.forEach(field => {
-                        const mappedHeader = mapping[field.key];
-                        if (mappedHeader) {
-                            obj[field.key] = row[mappedHeader];
-                        }
-                    });
-                    return obj;
-                });
-
-                onImport(finalData);
-            };
-            if (file) reader.readAsBinaryString(file);
-        }
+        return newMapping;
     };
 
     return (
-        <div className="bg-white rounded-2xl shadow-2xl border border-slate-200 overflow-hidden max-w-4xl w-full mx-auto animate-in zoom-in-95 duration-200">
+        <div className="bg-white rounded-2xl shadow-2xl border border-slate-200 overflow-hidden max-w-2xl w-full mx-auto animate-in zoom-in-95 duration-200">
             <div className="p-6 border-b border-slate-100 flex items-center justify-between bg-slate-50/50">
                 <div className="flex items-center gap-3">
                     <div className="bg-blue-600 p-2 rounded-xl">
                         <Upload className="w-5 h-5 text-white" />
                     </div>
                     <div>
-                        <h2 className="text-lg font-bold text-slate-800">Importação Inteligente</h2>
-                        <p className="text-xs text-slate-500">Transforme seu cronograma em dados operacionais</p>
+                        <h2 className="text-lg font-bold text-slate-800">Auto-Importação</h2>
+                        <p className="text-xs text-slate-500">Envie seu arquivo e o sistema fará o resto</p>
                     </div>
                 </div>
-                <button onClick={onCancel} className="text-slate-400 hover:text-slate-600 transition-colors">
-                    Cancelar
-                </button>
+                {!isAIProcessing && (
+                    <button onClick={onCancel} className="text-slate-400 hover:text-slate-600 transition-colors">
+                        Cancelar
+                    </button>
+                )}
             </div>
 
-            <div className="p-8">
-                {!file ? (
-                    <label className="flex flex-col items-center justify-center border-2 border-dashed border-slate-200 rounded-2xl p-12 hover:border-blue-400 hover:bg-blue-50/50 transition-all cursor-pointer group">
-                        {isAIProcessing ? (
-                            <div className="flex flex-col items-center animate-pulse">
-                                <div className="bg-blue-600 p-4 rounded-[32px] shadow-2xl shadow-blue-500/40 mb-6">
-                                    <BrainCircuit className="w-12 h-12 text-white animate-bounce" />
-                                </div>
-                                <h3 className="text-xl font-black text-slate-900 mb-2 uppercase tracking-tight">IA Pro Processando</h3>
-                                <p className="text-slate-500 font-medium text-sm">{aiStatus}</p>
+            <div className="p-10">
+                <label className={`flex flex-col items-center justify-center border-2 border-dashed rounded-2xl p-12 transition-all ${isAIProcessing ? 'border-blue-200 bg-blue-50/50 cursor-wait' : 'border-slate-200 hover:border-blue-400 hover:bg-blue-50/50 cursor-pointer group'
+                    }`}>
+                    {isAIProcessing ? (
+                        <div className="flex flex-col items-center">
+                            <div className="bg-blue-600 p-5 rounded-[32px] shadow-2xl shadow-blue-500/30 mb-6 relative">
+                                <BrainCircuit className="w-12 h-12 text-white animate-pulse" />
+                                <div className="absolute inset-0 bg-white/20 rounded-[32px] animate-ping" />
                             </div>
-                        ) : (
-                            <>
-                                <div className="bg-slate-100 p-4 rounded-full group-hover:bg-blue-100 transition-colors">
-                                    <FileText className="w-8 h-8 text-slate-400 group-hover:text-blue-600" />
-                                </div>
-                                <p className="mt-4 font-bold text-slate-700">Clique para fazer upload</p>
-                                <p className="text-sm text-slate-400">Excel, CSV ou PDF</p>
-                                <input type="file" className="hidden" accept=".xlsx,.xls,.csv,.pdf" onChange={handleFileUpload} />
-                            </>
-                        )}
-                    </label>
-                ) : (
-                    <div className="grid grid-cols-2 gap-8">
-                        <div className="space-y-4">
-                            <h3 className="font-bold text-slate-800 flex items-center gap-2">
-                                <CheckCircle2 className="w-4 h-4 text-green-500" />
-                                Mapeamento de Colunas
-                            </h3>
-                            <div className="space-y-3">
-                                {expectedFields.map(f => (
-                                    <div key={f.key} className="flex items-center justify-between p-3 bg-slate-50 rounded-xl border border-slate-100">
-                                        <span className="text-sm font-semibold text-slate-600">
-                                            {f.label} {f.required && <span className="text-red-500">*</span>}
-                                        </span>
-                                        <div className="flex items-center gap-2">
-                                            <ChevronRight className="w-3 h-3 text-slate-300" />
-                                            <span className={`text-sm font-bold ${mapping[f.key] ? 'text-blue-600' : 'text-slate-400 italic'}`}>
-                                                {mapping[f.key] || 'Não mapeado'}
-                                            </span>
-                                        </div>
-                                    </div>
-                                ))}
+                            <h3 className="text-xl font-bold text-slate-900 mb-2 uppercase tracking-tight">Processando Cronograma</h3>
+                            <p className="text-blue-600 font-bold text-sm animate-pulse">{aiStatus || 'Analisando dados...'}</p>
+                            <div className="mt-8 flex gap-1">
+                                <div className="w-2 h-2 bg-blue-600 rounded-full animate-bounce [animation-delay:-0.3s]" />
+                                <div className="w-2 h-2 bg-blue-600 rounded-full animate-bounce [animation-delay:-0.15s]" />
+                                <div className="w-2 h-2 bg-blue-600 rounded-full animate-bounce" />
                             </div>
                         </div>
-
-                        <div className="space-y-4">
-                            <h3 className="font-bold text-slate-800 flex items-center gap-2">
-                                Preview de Dados (Top 5)
-                            </h3>
-                            <div className="border border-slate-200 rounded-xl overflow-hidden overflow-x-auto">
-                                <table className="w-full text-xs">
-                                    <thead className="bg-slate-50">
-                                        <tr>{preview[0]?.map((h: any, i: number) => <th key={i} className="px-2 py-2 text-left text-slate-500 border-b">{h}</th>)}</tr>
-                                    </thead>
-                                    <tbody>
-                                        {preview.slice(1).map((row: any, i: number) => (
-                                            <tr key={i}>{row.map((cell: any, j: number) => <td key={j} className="px-2 py-2 text-slate-700 border-b">{cell}</td>)}</tr>
-                                        ))}
-                                    </tbody>
-                                </table>
+                    ) : (
+                        <>
+                            <div className="bg-slate-100 p-5 rounded-3xl group-hover:bg-blue-100 transition-colors">
+                                <FileText className="w-10 h-10 text-slate-400 group-hover:text-blue-600" />
                             </div>
-                        </div>
-                    </div>
-                )}
+                            <div className="mt-6 text-center">
+                                <p className="text-lg font-bold text-slate-700">Arraste ou clique para importar</p>
+                                <p className="text-sm text-slate-400 mt-1">Excel, CSV ou PDF (Cronograma Original)</p>
+                            </div>
+                            <div className="mt-8 flex items-center gap-2 px-4 py-2 bg-slate-900 text-white rounded-xl text-xs font-bold shadow-lg shadow-slate-200">
+                                <Zap className="w-3.5 h-3.5 text-yellow-400 fill-yellow-400" />
+                                IA ATIVA PARA PDFS E IMAGENS
+                            </div>
+                            <input type="file" className="hidden" accept=".xlsx,.xls,.csv,.pdf,image/*" onChange={handleFileUpload} />
+                        </>
+                    )}
+                </label>
 
                 {error && (
-                    <div className="mt-6 flex items-center gap-2 text-red-600 bg-red-50 p-4 rounded-xl border border-red-100">
-                        <AlertCircle className="w-4 h-4" />
-                        <p className="text-sm font-bold">{error}</p>
+                    <div className="mt-8 flex items-start gap-3 text-red-600 bg-red-50 p-5 rounded-2xl border border-red-100">
+                        <AlertCircle className="w-5 h-5 shrink-0 mt-0.5" />
+                        <div>
+                            <p className="text-sm font-black uppercase tracking-tight mb-1">Erro na Importação</p>
+                            <p className="text-sm font-medium leading-relaxed">{error}</p>
+                            {error.includes('API Key') && (
+                                <p className="mt-2 text-xs font-bold bg-white/50 p-2 rounded-lg border border-red-200">
+                                    Dica: Verifique se o arquivo `.env.local` contém uma chave Gemini Pro válida.
+                                </p>
+                            )}
+                        </div>
                     </div>
                 )}
+            </div>
 
-                {file && (
-                    <div className="mt-8 flex justify-end gap-3">
-                        <button
-                            onClick={() => { setFile(null); setPreview([]); }}
-                            className="px-6 py-2.5 rounded-xl font-bold text-slate-500 hover:bg-slate-100 transition-all"
-                        >
-                            Trocar Arquivo
-                        </button>
-                        <button
-                            onClick={validateAndImport}
-                            className="px-8 py-2.5 bg-blue-600 text-white rounded-xl font-bold hover:bg-blue-700 transition-all shadow-lg shadow-blue-200"
-                        >
-                            Confirmar Importação
-                        </button>
-                    </div>
-                )}
+            <div className="p-6 bg-slate-50 border-t border-slate-100 flex justify-center">
+                <p className="text-[10px] text-slate-400 font-bold uppercase tracking-widest flex items-center gap-2">
+                    <CheckCircle2 className="w-3.5 h-3.5" />
+                    Processamento direto e seguro via PCM Engine
+                </p>
             </div>
         </div>
     );
