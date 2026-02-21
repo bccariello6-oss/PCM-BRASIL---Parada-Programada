@@ -138,27 +138,52 @@ export const shutdownService = {
     },
 
     async importFromData(eventoId: string, rows: any[]) {
-        // Mapping logic
-        const mapping: any = {
-            atividade: ['atividade', 'tarefa'],
-            subatividade: ['subatividade', 'sub tarefa'],
-            inicio_previsto: ['inicio', 'data inicio', 'start'],
-            fim_previsto: ['fim', 'termino', 'finish'],
-            percentual_planejado: ['% planejado', 'planejado'],
-            percentual_real: ['% real', 'realizado', 'real'],
-            responsavel: ['responsavel', 'executor'],
-            area: ['area', 'disciplina']
-        };
+        try {
+            // 1. Identify and create Areas
+            const uniqueAreaNames = Array.from(new Set(rows.map(r => r.area || 'Geral').filter(Boolean))) as string[];
+            const areasMap = new Map<string, string>();
 
-        const findKey = (header: string) => {
-            const normalized = header.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
-            for (const [key, variations] of Object.entries(mapping)) {
-                if ((variations as string[]).some(v => normalized.includes(v))) return key;
+            for (const areaName of uniqueAreaNames) {
+                const { data, error } = await supabase
+                    .from('areas')
+                    .insert({ evento_id: eventoId, nome: areaName })
+                    .select()
+                    .single();
+
+                if (error) console.error('Error creating area:', error);
+                if (data) areasMap.set(areaName, data.id);
             }
-            return null;
-        };
 
-        // implementation of smart import would go here...
-        // Creating Areas first, then Activities with hierarchy mapping.
+            // 2. Prepare Activities
+            // We'll do this in two passes: parents first, then children.
+            // Or just create them and link via common names/IDs if provided by AI.
+
+            for (const row of rows) {
+                const areaId = areasMap.get(row.area || 'Geral');
+                const { data: act, error: actError } = await supabase
+                    .from('atividades')
+                    .insert({
+                        evento_id: eventoId,
+                        area_id: areaId,
+                        nome: row.atividade || row.name,
+                        responsavel: row.responsavel || row.responsible,
+                        inicio_previsto: row.inicio_previsto || row.start_date,
+                        fim_previsto: row.fim_previsto || row.end_date,
+                        duracao: row.duracao || 1,
+                        percentual_planejado: row.percentual_planejado || 100,
+                        percentual_real: row.percentual_real || 0,
+                        criticidade: row.criticidade || (row.is_critical ? 'Alta' : 'Normal')
+                    })
+                    .select()
+                    .single();
+
+                if (actError) console.error('Error creating activity:', actError);
+            }
+
+            return { success: true };
+        } catch (error) {
+            console.error('Import failed:', error);
+            throw error;
+        }
     }
 };

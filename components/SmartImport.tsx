@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
-import { Upload, FileText, AlertCircle, CheckCircle2, ChevronRight } from 'lucide-react';
+import { Upload, FileText, AlertCircle, CheckCircle2, ChevronRight, Loader2, Zap, BrainCircuit } from 'lucide-react';
 import * as XLSX from 'xlsx';
+import { GoogleGenAI } from "@google/genai";
 
 interface SmartImportProps {
     onImport: (data: any[]) => void;
@@ -12,6 +13,9 @@ const SmartImport: React.FC<SmartImportProps> = ({ onImport, onCancel }) => {
     const [preview, setPreview] = useState<any[]>([]);
     const [mapping, setMapping] = useState<Record<string, string>>({});
     const [error, setError] = useState<string | null>(null);
+    const [isAIProcessing, setIsAIProcessing] = useState(false);
+    const [aiStatus, setAIStatus] = useState('');
+    const [aiResult, setAiResult] = useState<any[]>([]);
 
     const expectedFields = [
         { key: 'atividade', label: 'Atividade', required: true },
@@ -23,11 +27,30 @@ const SmartImport: React.FC<SmartImportProps> = ({ onImport, onCancel }) => {
         { key: 'subatividade', label: 'Subatividade' }
     ];
 
-    const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const fileToBase64 = (file: File): Promise<string> => {
+        return new Promise((resolve, reject) => {
+            const reader = new FileReader();
+            reader.readAsDataURL(file);
+            reader.onload = () => resolve((reader.result as string).split(',')[1]);
+            reader.onerror = error => reject(error);
+        });
+    };
+
+    const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
         const uploadedFile = e.target.files?.[0];
         if (!uploadedFile) return;
 
         setFile(uploadedFile);
+        setError(null);
+
+        if (uploadedFile.type === 'application/pdf' || uploadedFile.type.startsWith('image/')) {
+            await handleAIParsing(uploadedFile);
+        } else {
+            handleExcelParsing(uploadedFile);
+        }
+    };
+
+    const handleExcelParsing = (uploadedFile: File) => {
         const reader = new FileReader();
         reader.onload = (event) => {
             const bstr = event.target?.result;
@@ -43,6 +66,51 @@ const SmartImport: React.FC<SmartImportProps> = ({ onImport, onCancel }) => {
             }
         };
         reader.readAsBinaryString(uploadedFile);
+    };
+
+    const handleAIParsing = async (uploadedFile: File) => {
+        setIsAIProcessing(true);
+        setAIStatus('Iniciando OCR Inteligente...');
+
+        try {
+            const base64Data = await fileToBase64(uploadedFile);
+            const ai = new GoogleGenAI({ apiKey: import.meta.env.VITE_GEMINI_API_KEY });
+
+            setAIStatus('Processando estrutura do cronograma via IA Pro...');
+
+            const response = await ai.models.generateContent({
+                model: 'gemini-1.5-flash',
+                contents: [{
+                    parts: [
+                        { inlineData: { mimeType: uploadedFile.type, data: base64Data } },
+                        {
+                            text: `Extraia o cronograma deste documento. Procure por colunas como Atividade, Início, Fim, Responsável, etc.
+                        Retorne um JSON array de objetos. 
+                        Tente identificar a hierarquia (Subatividades).
+                        Campos sugeridos: atividade, inicio_previsto, fim_previsto, responsavel, percentual_real, area, subatividade.` }
+                    ]
+                }],
+                config: {
+                    responseMimeType: "application/json"
+                }
+            });
+
+            const rawData = JSON.parse(response.text || "[]");
+            if (rawData.length > 0) {
+                setAiResult(rawData);
+                setPreview(rawData.slice(0, 5).map((r: any) => Object.values(r)));
+                const headers = Object.keys(rawData[0]);
+                autoMap(headers);
+            } else {
+                setError('A IA não conseguiu identificar dados neste arquivo.');
+            }
+        } catch (err) {
+            console.error("Erro no processamento AI:", err);
+            setError('Erro ao processar arquivo com IA. Verifique sua chave API.');
+        } finally {
+            setIsAIProcessing(false);
+            setAIStatus('');
+        }
     };
 
     const autoMap = (headers: string[]) => {
@@ -80,8 +148,32 @@ const SmartImport: React.FC<SmartImportProps> = ({ onImport, onCancel }) => {
             return;
         }
 
-        // Process all data
-        onImport([]); // Pass mapped data
+        if (aiResult.length > 0) {
+            onImport(aiResult);
+        } else {
+            // Process Excel data using the mapping
+            const reader = new FileReader();
+            reader.onload = (event) => {
+                const bstr = event.target?.result;
+                const wb = XLSX.read(bstr, { type: 'binary' });
+                const ws = wb.Sheets[wb.SheetNames[0]];
+                const data = XLSX.utils.sheet_to_json(ws);
+
+                const finalData = data.map((row: any) => {
+                    const obj: any = {};
+                    expectedFields.forEach(field => {
+                        const mappedHeader = mapping[field.key];
+                        if (mappedHeader) {
+                            obj[field.key] = row[mappedHeader];
+                        }
+                    });
+                    return obj;
+                });
+
+                onImport(finalData);
+            };
+            if (file) reader.readAsBinaryString(file);
+        }
     };
 
     return (
@@ -104,12 +196,24 @@ const SmartImport: React.FC<SmartImportProps> = ({ onImport, onCancel }) => {
             <div className="p-8">
                 {!file ? (
                     <label className="flex flex-col items-center justify-center border-2 border-dashed border-slate-200 rounded-2xl p-12 hover:border-blue-400 hover:bg-blue-50/50 transition-all cursor-pointer group">
-                        <div className="bg-slate-100 p-4 rounded-full group-hover:bg-blue-100 transition-colors">
-                            <FileText className="w-8 h-8 text-slate-400 group-hover:text-blue-600" />
-                        </div>
-                        <p className="mt-4 font-bold text-slate-700">Clique para fazer upload</p>
-                        <p className="text-sm text-slate-400">Excel, CSV ou PDF</p>
-                        <input type="file" className="hidden" accept=".xlsx,.xls,.csv,.pdf" onChange={handleFileUpload} />
+                        {isAIProcessing ? (
+                            <div className="flex flex-col items-center animate-pulse">
+                                <div className="bg-blue-600 p-4 rounded-[32px] shadow-2xl shadow-blue-500/40 mb-6">
+                                    <BrainCircuit className="w-12 h-12 text-white animate-bounce" />
+                                </div>
+                                <h3 className="text-xl font-black text-slate-900 mb-2 uppercase tracking-tight">IA Pro Processando</h3>
+                                <p className="text-slate-500 font-medium text-sm">{aiStatus}</p>
+                            </div>
+                        ) : (
+                            <>
+                                <div className="bg-slate-100 p-4 rounded-full group-hover:bg-blue-100 transition-colors">
+                                    <FileText className="w-8 h-8 text-slate-400 group-hover:text-blue-600" />
+                                </div>
+                                <p className="mt-4 font-bold text-slate-700">Clique para fazer upload</p>
+                                <p className="text-sm text-slate-400">Excel, CSV ou PDF</p>
+                                <input type="file" className="hidden" accept=".xlsx,.xls,.csv,.pdf" onChange={handleFileUpload} />
+                            </>
+                        )}
                     </label>
                 ) : (
                     <div className="grid grid-cols-2 gap-8">

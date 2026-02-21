@@ -87,8 +87,17 @@ const App: React.FC = () => {
   };
 
   const handleImportShutdown = async (data: any[]) => {
-    // Import logic here
-    console.log('Importing...', data);
+    if (!activeEvent) return;
+    setLoading(true);
+    try {
+      await shutdownService.importFromData(activeEvent.id, data);
+      await fetchShutdownData();
+    } catch (error) {
+      console.error('Error importing shutdown:', error);
+      alert('Erro ao importar dados. Verifique o console.');
+    } finally {
+      setLoading(false);
+    }
   };
 
   if (loading) return null;
