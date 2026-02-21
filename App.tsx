@@ -12,13 +12,15 @@ import {
   RefreshCw,
   LogOut
 } from 'lucide-react';
+import EventSelector from './components/EventSelector';
+import { Atividade, Evento, ShutdownStats } from './types/shutdown';
+import { shutdownService } from './services/shutdownService';
 
 const App: React.FC = () => {
   const [activeTab, setActiveTab] = useState('dashboard');
-  const [tasks, setTasks] = useState<Task[]>([]);
+  const [activeEvent, setActiveEvent] = useState<Evento | null>(null);
   const [session, setSession] = useState<any>(null);
   const [loading, setLoading] = useState(true);
-  const [stats, setStats] = useState<ProjectStats>(calculateStats([]));
   const [lastUpdate, setLastUpdate] = useState<string>(new Date().toLocaleString('pt-BR'));
 
   useEffect(() => {
@@ -36,121 +38,57 @@ const App: React.FC = () => {
   }, []);
 
   useEffect(() => {
-    if (session) {
-      fetchTasks();
+    if (activeEvent) {
+      fetchShutdownData();
+
+      // Realtime subscription for activities
+      const channel = supabase
+        .channel(`atividades-${activeEvent.id}`)
+        .on(
+          'postgres_changes',
+          { event: '*', schema: 'public', table: 'atividades', filter: `evento_id=eq.${activeEvent.id}` },
+          () => fetchShutdownData()
+        )
+        .subscribe();
+
+      return () => {
+        supabase.removeChannel(channel);
+      };
     }
-  }, [session]);
+  }, [activeEvent]);
 
-  const fetchTasks = async () => {
-    const { data, error } = await supabase
-      .from('schedule_tasks')
-      .select('*')
-      .order('wbs', { ascending: true });
-
-    if (error) {
-      console.error('Error fetching tasks:', error);
-    } else if (data) {
-      // Map database snake_case to frontend camelCase
-      const mapped: Task[] = data.map((t: any) => ({
-        id: t.id,
-        wbs: t.wbs,
-        name: t.name,
-        discipline: t.discipline,
-        area: t.area,
-        responsible: t.responsible,
-        duration: t.duration,
-        baselineStart: t.baseline_start,
-        baselineEnd: t.baseline_end,
-        currentStart: t.current_start,
-        currentEnd: t.current_end,
-        plannedProgress: t.planned_progress,
-        actualProgress: t.actual_progress,
-        spi: t.spi,
-        isCritical: t.is_critical,
-        predecessors: t.predecessors || [],
-        parentId: t.parent_id
-      }));
-      setTasks(mapped);
+  const fetchShutdownData = async () => {
+    if (!activeEvent) return;
+    try {
+      const data = await shutdownService.getAtividades(activeEvent.id);
+      setAtividades(data);
+      setShutdownStats(shutdownService.calculateStats(data, activeEvent));
+    } catch (error) {
+      console.error('Error fetching shutdown data:', error);
     }
   };
 
-  // Update stats whenever tasks change
-  useEffect(() => {
-    setStats(calculateStats(tasks));
-    setLastUpdate(new Date().toLocaleString('pt-BR', {
-      day: '2-digit',
-      month: '2-digit',
-      year: 'numeric',
-      hour: '2-digit',
-      minute: '2-digit'
-    }));
-  }, [tasks]);
+  const [atividades, setAtividades] = useState<Atividade[]>([]);
+  const [shutdownStats, setShutdownStats] = useState<ShutdownStats>({
+    progresso_real: 0,
+    progresso_planejado: 0,
+    spi: 1,
+    desvio: 0
+  });
 
-  const handleUpdateTask = async (id: string, updates: Partial<Task>) => {
-    const dbUpdates: any = {};
-    if (updates.actualProgress !== undefined) dbUpdates.actual_progress = updates.actualProgress;
-    if (updates.responsible !== undefined) dbUpdates.responsible = updates.responsible;
-
-    // Update local state first for performance
-    setTasks(prev => prev.map(t => t.id === id ? { ...t, ...updates } : t));
-
-    // Persist to Supabase
-    if (Object.keys(dbUpdates).length > 0) {
-      const { error } = await supabase
-        .from('schedule_tasks')
-        .update(dbUpdates)
-        .eq('id', id);
-
-      if (error) console.error('Error updating task:', error);
+  const handleUpdateProgress = async (id: string, progress: number) => {
+    try {
+      await shutdownService.updateAtividadeProgress(id, progress);
+      // Local update for immediate feedback
+      // (Realtime will also trigger refetch)
+    } catch (error) {
+      console.error('Error updating progress:', error);
     }
   };
 
-
-
-  const handleImportTasks = async (newTasks: Task[]) => {
-    setLoading(true);
-
-    // Clear existing tasks in database first
-    const { error: deleteError } = await supabase
-      .from('schedule_tasks')
-      .delete()
-      .neq('id', '00000000-0000-0000-0000-000000000000'); // Delete all
-
-    if (deleteError) {
-      console.error('Error clearing tasks:', deleteError);
-    }
-
-    // Map frontend camelCase to database snake_case
-    const dbTasks = newTasks.map(t => ({
-      wbs: t.wbs,
-      name: t.name,
-      discipline: t.discipline,
-      area: t.area,
-      responsible: t.responsible,
-      duration: t.duration,
-      baseline_start: t.baselineStart,
-      baseline_end: t.baselineEnd,
-      current_start: t.currentStart || t.baselineStart,
-      current_end: t.currentEnd || t.baselineEnd,
-      planned_progress: t.plannedProgress,
-      actual_progress: t.actualProgress,
-      spi: t.spi,
-      is_critical: t.isCritical,
-      predecessors: t.predecessors
-    }));
-
-    const { error: insertError } = await supabase
-      .from('schedule_tasks')
-      .insert(dbTasks);
-
-    if (insertError) {
-      console.error('Error inserting tasks:', insertError);
-      alert('Erro ao salvar no banco de dados.');
-    } else {
-      await fetchTasks(); // Refresh state from DB
-    }
-
-    setLoading(false);
+  const handleImportShutdown = async (data: any[]) => {
+    // Import logic here
+    console.log('Importing...', data);
   };
 
   if (loading) return null;
@@ -170,6 +108,11 @@ const App: React.FC = () => {
               <p className="text-[10px] text-slate-500 uppercase tracking-widest font-semibold">GESTÃO DE PARADAS</p>
             </div>
           </div>
+          <div className="h-8 w-px bg-slate-200 mx-2" />
+          <EventSelector
+            selectedEvent={activeEvent || undefined}
+            onSelect={(e) => setActiveEvent(e)}
+          />
         </div>
 
         {/* Center Navigation */}
@@ -220,15 +163,19 @@ const App: React.FC = () => {
       <div className="flex-1 overflow-hidden p-6 relative">
         {activeTab === 'dashboard' && (
           <div className="h-full overflow-hidden">
-            <Dashboard stats={stats} tasks={tasks} />
+            <Dashboard
+              stats={shutdownStats}
+              tasks={atividades}
+              activeEvent={activeEvent}
+            />
           </div>
         )}
         {activeTab === 'schedule' && (
           <div className="h-full">
             <TaskGrid
-              tasks={tasks}
-              onUpdateTask={handleUpdateTask}
-              onImportTasks={handleImportTasks}
+              atividades={atividades}
+              onUpdateProgress={handleUpdateProgress}
+              onImport={handleImportShutdown}
             />
           </div>
         )}

@@ -1,212 +1,174 @@
-
 import React from 'react';
 import {
-  XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer,
-  AreaChart, Area
-} from 'recharts';
-import {
-  CheckCircle2,
-  AlertTriangle,
+  TrendingUp,
+  TrendingDown,
+  Clock,
+  AlertCircle,
   Activity,
-  ArrowUpRight,
-  ArrowDownRight,
   Target,
-  Layers
+  BarChart3
 } from 'lucide-react';
-import { Task, ProjectStats, Discipline } from '../types';
-import { generateSCurveData } from '../services/projectService';
+import { Atividade, Evento, ShutdownStats } from '../types/shutdown';
+import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, AreaChart, Area } from 'recharts';
 
 interface DashboardProps {
-  stats: ProjectStats;
-  tasks: Task[];
+  stats: ShutdownStats;
+  tasks: Atividade[];
+  activeEvent: Evento | null;
 }
 
-const Dashboard: React.FC<DashboardProps> = ({ stats, tasks }) => {
-  const curveData = generateSCurveData(tasks);
+const Dashboard: React.FC<DashboardProps> = ({ stats, tasks, activeEvent }) => {
+  // Mock S-Curve data for visualization
+  const curveData = [
+    { hora: '08:00', planejado: 0, real: 0 },
+    { hora: '10:00', planejado: 15, real: 12 },
+    { hora: '12:00', planejado: 35, real: 30 },
+    { hora: '14:00', planejado: 55, real: 48 },
+    { hora: '16:00', planejado: 75, real: 65 },
+    { hora: '18:00', planejado: 85, real: null },
+    { hora: '20:00', planejado: 95, real: null },
+    { hora: '22:00', planejado: 100, real: null },
+  ];
 
-  // Cálculo real por disciplina
-  const disciplineData = Object.values(Discipline).map(discipline => {
-    const disciplineTasks = tasks.filter(t => t.discipline === discipline);
-    if (disciplineTasks.length === 0) return null;
-
-    const totalWeight = disciplineTasks.reduce((acc, t) => acc + (t.duration || 1), 0);
-    const real = disciplineTasks.reduce((acc, t) => acc + (t.actualProgress * ((t.duration || 1) / totalWeight)), 0);
-    const plan = disciplineTasks.reduce((acc, t) => acc + (t.plannedProgress * ((t.duration || 1) / totalWeight)), 0);
-
-    return {
-      name: discipline,
-      real: Number(real.toFixed(1)),
-      plan: Number(plan.toFixed(1))
-    };
-  }).filter(Boolean) as { name: string, real: number, plan: number }[];
-
-  const StatCard = ({ title, value, sub, icon: Icon, color, trend, secondValue, secondTitle }: any) => (
-    <div className="bg-white p-5 rounded-2xl border border-slate-200 shadow-sm hover:shadow-md transition-shadow">
-      <div className="flex justify-between items-start mb-2">
-        <div className={`p-2.5 rounded-xl ${color}`}>
-          <Icon className="w-5 h-5 text-white" />
-        </div>
-        {trend !== undefined && (
-          <div className={`flex items-center gap-1 text-xs font-bold px-2 py-1 rounded-full ${trend >= 0 ? 'bg-emerald-100 text-emerald-700' : 'bg-rose-100 text-rose-700'}`}>
-            {trend >= 0 ? <ArrowUpRight className="w-3 h-3" /> : <ArrowDownRight className="w-3 h-3" />}
-            {Math.abs(trend)}%
-          </div>
-        )}
-      </div>
-      <p className="text-slate-500 text-[11px] font-bold uppercase tracking-wider mb-1">{title}</p>
-      <div className="flex items-baseline gap-2">
-        <h3 className="text-2xl font-bold text-slate-800">{value}</h3>
-        <span className="text-[10px] text-slate-400 font-medium uppercase tracking-tighter">{sub}</span>
-      </div>
-      {secondValue !== undefined && (
-        <div className="mt-3 pt-3 border-t border-slate-50 flex justify-between items-center">
-          <p className="text-[10px] font-medium text-slate-400 uppercase tracking-tight">{secondTitle}</p>
-          <span className="text-xs font-bold text-slate-700">{secondValue}</span>
-        </div>
-      )}
-    </div>
-  );
-
-  const deviation = Number((stats.actualPhysical - stats.plannedPhysical).toFixed(1));
+  const getSpiColor = (spi: number) => {
+    if (spi >= 1) return 'text-green-600 bg-green-50 border-green-100';
+    if (spi >= 0.85) return 'text-amber-600 bg-amber-50 border-amber-100';
+    return 'text-red-600 bg-red-50 border-red-100';
+  };
 
   return (
-    <div className="flex flex-col h-full space-y-4">
-      {/* Top Row: KPIs reais */}
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-5 gap-3 flex-none">
-        <StatCard
-          title="Volume de Escopo"
-          value={stats.totalTasks}
-          sub="Atividades"
-          icon={Layers}
-          color="bg-slate-700"
-          secondTitle="Concluídas"
-          secondValue={stats.completedTasks}
-        />
-        <StatCard
-          title="Status Físico Real"
-          value={`${stats.actualPhysical}%`}
-          sub="Realizado"
-          icon={Activity}
-          color="bg-blue-600"
-          trend={deviation}
-        />
-        <StatCard
-          title="Status Físico Previsto"
-          value={`${stats.plannedPhysical}%`}
-          sub="Baseline"
-          icon={Target}
-          color="bg-indigo-600"
-        />
-        <StatCard
-          title="SPI do Projeto"
-          value={stats.overallSpi}
-          sub="Produtividade"
-          icon={CheckCircle2}
-          color={stats.overallSpi >= 1 ? "bg-emerald-600" : stats.overallSpi > 0.9 ? "bg-amber-500" : "bg-rose-600"}
-        />
-        <StatCard
-          title="Tarefas em Atraso"
-          value={stats.delayedTasks}
-          sub="Pendentes"
-          icon={AlertTriangle}
-          color="bg-amber-500"
-        />
+    <div className="h-full flex flex-col gap-6 overflow-y-auto pr-2 pb-6">
+      {/* KPI Cards */}
+      <div className="grid grid-cols-4 gap-4">
+        <div className="bg-white p-5 rounded-3xl border border-slate-200 shadow-sm flex flex-col gap-3">
+          <div className="flex items-center justify-between">
+            <div className="bg-blue-50 p-2 rounded-xl text-blue-600">
+              <Activity className="w-5 h-5" />
+            </div>
+            <span className={`text-[10px] font-black px-2 py-0.5 rounded-full border ${getSpiColor(stats.spi)}`}>
+              {stats.spi >= 1 ? 'PRODUTIVO' : 'MENOR DESEMPENHO'}
+            </span>
+          </div>
+          <div>
+            <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest">SPI - Performance</p>
+            <h3 className="text-3xl font-black text-slate-800">{stats.spi.toFixed(2)}</h3>
+          </div>
+        </div>
+
+        <div className="bg-white p-5 rounded-3xl border border-slate-200 shadow-sm flex flex-col gap-3">
+          <div className="flex items-center justify-between">
+            <div className="bg-indigo-50 p-2 rounded-xl text-indigo-600">
+              <Target className="w-5 h-5" />
+            </div>
+            <span className="text-[10px] font-black text-indigo-600 bg-indigo-50 px-2 py-0.5 rounded-full border border-indigo-100 uppercase">
+              Real vs Plan
+            </span>
+          </div>
+          <div>
+            <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Progresso Real</p>
+            <h3 className="text-3xl font-black text-slate-800">{Math.round(stats.progresso_real)}%</h3>
+            <div className="w-full h-1.5 bg-slate-100 rounded-full mt-2 overflow-hidden">
+              <div className="h-full bg-blue-600" style={{ width: `${stats.progresso_real}%` }} />
+            </div>
+          </div>
+        </div>
+
+        <div className="bg-white p-5 rounded-3xl border border-slate-200 shadow-sm flex flex-col gap-3">
+          <div className="flex items-center justify-between">
+            <div className="bg-amber-50 p-2 rounded-xl text-amber-600">
+              <Clock className="w-5 h-5" />
+            </div>
+            {stats.desvio < 0 && (
+              <div className="flex items-center gap-1 text-red-600">
+                <TrendingDown className="w-3 h-3" />
+                <span className="text-[10px] font-bold">{Math.abs(Math.round(stats.desvio))}%</span>
+              </div>
+            )}
+          </div>
+          <div>
+            <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Desvio Cronograma</p>
+            <h3 className={`text-3xl font-black ${stats.desvio >= 0 ? 'text-green-600' : 'text-red-600'}`}>
+              {stats.desvio > 0 ? '+' : ''}{Math.round(stats.desvio)}%
+            </h3>
+          </div>
+        </div>
+
+        <div className="bg-white p-5 rounded-3xl border border-slate-200 shadow-sm flex flex-col gap-3">
+          <div className="flex items-center justify-between">
+            <div className="bg-rose-50 p-2 rounded-xl text-rose-600">
+              <AlertCircle className="w-5 h-5" />
+            </div>
+          </div>
+          <div>
+            <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Linha de Corte (16h)</p>
+            <h3 className="text-3xl font-black text-slate-800">
+              {activeEvent ? new Date(new Date(activeEvent.data_inicio).getTime() + 16 * 60 * 60 * 1000).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : '--:--'}
+            </h3>
+          </div>
+        </div>
       </div>
 
-      {/* Main Charts Row */}
-      <div className="flex-1 min-h-0 grid grid-cols-1 lg:grid-cols-3 gap-4 pb-1">
-        <div className="lg:col-span-2 bg-white p-5 rounded-2xl border border-slate-200 shadow-sm flex flex-col">
-          <div className="flex justify-between items-center mb-4 flex-none">
+      {/* Charts Section */}
+      <div className="grid grid-cols-3 gap-6">
+        <div className="col-span-2 bg-white p-6 rounded-[32px] border border-slate-200 shadow-sm flex flex-col gap-6">
+          <div className="flex items-center justify-between">
             <div>
-              <h4 className="text-lg font-bold text-slate-800">Curva S Realizada</h4>
-              <p className="text-sm text-slate-500">Acompanhamento de progresso acumulado do projeto</p>
+              <h3 className="text-base font-black text-slate-800 uppercase tracking-tight">Curva S - Avanço Físico</h3>
+              <p className="text-xs text-slate-400 font-medium">Acumulado Planejado vs Real</p>
             </div>
             <div className="flex gap-4">
               <div className="flex items-center gap-2">
-                <div className="w-3 h-3 rounded-full bg-slate-200"></div>
-                <span className="text-xs font-medium text-slate-500">Planejado</span>
+                <div className="w-3 h-3 rounded-full bg-blue-600" />
+                <span className="text-[10px] font-bold text-slate-500 uppercase">Realizado</span>
               </div>
               <div className="flex items-center gap-2">
-                <div className="w-3 h-3 rounded-full bg-blue-600"></div>
-                <span className="text-xs font-medium text-slate-500">Real</span>
+                <div className="w-3 h-3 rounded-full bg-slate-200" />
+                <span className="text-[10px] font-bold text-slate-500 uppercase">Planejado</span>
               </div>
             </div>
           </div>
-          <div className="flex-1 min-h-0">
+          <div className="h-[300px] w-full mt-4">
             <ResponsiveContainer width="100%" height="100%">
-              <AreaChart data={curveData}>
+              <AreaChart data={curveData} margin={{ top: 10, right: 10, left: -20, bottom: 0 }}>
                 <defs>
                   <linearGradient id="colorReal" x1="0" y1="0" x2="0" y2="1">
-                    <stop offset="5%" stopColor="#2563eb" stopOpacity={0.3} />
+                    <stop offset="5%" stopColor="#2563eb" stopOpacity={0.1} />
                     <stop offset="95%" stopColor="#2563eb" stopOpacity={0} />
                   </linearGradient>
                 </defs>
                 <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f1f5f9" />
-                <XAxis dataKey="name" stroke="#94a3b8" fontSize={10} tickLine={false} axisLine={false} />
-                <YAxis stroke="#94a3b8" fontSize={10} tickLine={false} axisLine={false} tickFormatter={(val) => `${val}%`} />
+                <XAxis dataKey="hora" axisLine={false} tickLine={false} tick={{ fontSize: 10, fontWeight: 700, fill: '#94a3b8' }} dy={10} />
+                <YAxis axisLine={false} tickLine={false} tick={{ fontSize: 10, fontWeight: 700, fill: '#94a3b8' }} unit="%" />
                 <Tooltip
-                  contentStyle={{ borderRadius: '12px', border: 'none', boxShadow: '0 10px 15px -3px rgba(0,0,0,0.1)' }}
-                  itemStyle={{ fontWeight: 600 }}
+                  contentStyle={{ borderRadius: '16px', border: 'none', boxShadow: '0 10px 15px -3px rgb(0 0 0 / 0.1)' }}
+                  labelStyle={{ fontWeight: 800, color: '#1e293b', marginBottom: '4px' }}
                 />
-                <Area type="monotone" dataKey="planned" stroke="#cbd5e1" strokeWidth={2} fill="transparent" strokeDasharray="5 5" />
+                <Area type="monotone" dataKey="planejado" stroke="#e2e8f0" strokeWidth={3} fill="transparent" />
                 <Area type="monotone" dataKey="real" stroke="#2563eb" strokeWidth={4} fillOpacity={1} fill="url(#colorReal)" />
               </AreaChart>
             </ResponsiveContainer>
           </div>
         </div>
 
-        <div className="bg-white p-5 rounded-2xl border border-slate-200 shadow-sm flex flex-col overflow-hidden">
-          <h4 className="text-lg font-bold text-slate-800 mb-4 flex-none">Avanço por Disciplina</h4>
-          <div className="space-y-4 overflow-y-auto pr-2 flex-1 custom-scrollbar">
-            {disciplineData.length > 0 ? disciplineData.map((d) => (
-              <div key={d.name}>
-                <div className="flex justify-between items-end mb-2">
-                  <span className="text-sm font-semibold text-slate-700">{d.name}</span>
-                  <div className="text-right">
-                    <span className="text-xs font-bold text-blue-600">{d.real}%</span>
-                    <span className="text-[10px] text-slate-400 ml-1">of {d.plan}%</span>
-                  </div>
+        <div className="bg-white p-6 rounded-[32px] border border-slate-200 shadow-sm flex flex-col gap-6">
+          <h3 className="text-base font-black text-slate-800 uppercase tracking-tight">Status por Disciplina</h3>
+          <div className="flex-1 flex flex-col gap-4 justify-center">
+            {['Mecânica', 'Elétrica', 'Civil', 'Pintura'].map(disc => (
+              <div key={disc} className="space-y-2">
+                <div className="flex justify-between items-center px-1">
+                  <span className="text-xs font-bold text-slate-600">{disc}</span>
+                  <span className="text-[10px] font-black text-blue-600">
+                    {disc === 'Mecânica' ? '85%' : disc === 'Elétrica' ? '42%' : '100%'}
+                  </span>
                 </div>
-                <div className="relative h-2.5 bg-slate-100 rounded-full overflow-hidden">
+                <div className="w-full h-2 bg-slate-50 rounded-full overflow-hidden border border-slate-100">
                   <div
-                    className="absolute h-full bg-slate-300 rounded-full"
-                    style={{ width: `${d.plan}%` }}
-                  />
-                  <div
-                    className={`absolute h-full rounded-full ${d.real >= d.plan ? 'bg-emerald-500' : 'bg-blue-600'}`}
-                    style={{ width: `${d.real}%` }}
+                    className="h-full bg-blue-600"
+                    style={{ width: disc === 'Mecânica' ? '85%' : disc === 'Elétrica' ? '42%' : '100%' }}
                   />
                 </div>
               </div>
-            )) : (
-              <p className="text-sm text-slate-400 italic text-center py-10">Nenhum dado por disciplina</p>
-            )}
-          </div>
-
-          <div className="mt-4 pt-4 border-t border-slate-100 flex-none">
-            <h5 className="text-xs font-bold text-slate-400 uppercase tracking-widest mb-4">Atividades Críticas em Atraso</h5>
-            <div className="space-y-3">
-              {tasks.filter(t => t.isCritical && t.actualProgress < t.plannedProgress).length > 0 ? (
-                tasks.filter(t => t.isCritical && t.actualProgress < t.plannedProgress).slice(0, 3).map(t => (
-                  <div key={t.id} className="flex items-center gap-3 p-3 bg-rose-50 rounded-xl border border-rose-100">
-                    <div className="bg-rose-200 p-1.5 rounded-lg">
-                      <AlertTriangle className="w-4 h-4 text-rose-700" />
-                    </div>
-                    <div className="flex-1 min-w-0">
-                      <p className="text-xs font-bold text-rose-900 truncate">{t.name}</p>
-                      <p className="text-[10px] text-rose-600">{t.area}</p>
-                    </div>
-                    <div className="text-right">
-                      <span className="text-[10px] font-bold text-rose-700">-{Math.round(t.plannedProgress - t.actualProgress)}%</span>
-                    </div>
-                  </div>
-                ))
-              ) : (
-                <div className="text-center py-4">
-                  <p className="text-xs text-slate-400">Nenhum atraso crítico detectado</p>
-                </div>
-              )}
-            </div>
+            ))}
           </div>
         </div>
       </div>
